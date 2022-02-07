@@ -14,7 +14,7 @@ import boto3
 import select
 # import my own functions from myFunctions.py
 from parse_adahrs import parse_adahrs
-from myFunctions import parse_ems, build_query, create_payload, inject_to_stream
+from myFunctions import parse_ems, create_payload
 
 # Setup Data UDP socket to listen to port 20003 from anyhost
 UDP_PORT = 20003
@@ -61,27 +61,27 @@ print('Init complete, listening....')
 while True:
     # Wait for next Dynon message, then process it
     data, addr = data_sock.recvfrom(1024) # buffer size is 1024 bytes
-    adahrs_raw = bytes.decode(data)
-    # Write raw data to file
-    f.write(adahrs_raw)
+    msg_raw = bytes.decode(data)
     # Check for valid ADAHRS message ('!1')
-    if (adahrs_raw[1] == '1'):
+    if (msg_raw[1] == '1'):
         # This is ADAHRS data, process it first
-        # Call parse function for ADAHRS
-        adahrs_lst = parse_adahrs(adahrs_raw)
-        print('adahrs:', adahrs_lst)
-        #
-        # Now get the next msg, which will be an EMS msg
-        data, addr = data_sock.recvfrom(1024) # buffer size is 1024 bytes
-        ems_raw = bytes.decode(data)
         # Write raw data to file
-        f.write(ems_raw)
-        # Check for valid EMS message ('!3')
-        if (ems_raw[1] == '3'):
-            # Call parse fuction for EMS (don't really need this)
-            ems_lst = parse_ems(ems_raw)
-            # Print to screen
-            print('ems:',ems_lst)
+        f.write(msg_raw)
+        # Call parse function for ADAHRS to create a list of variables
+        adahrs_lst = parse_adahrs(msg_raw)
+        # Print to screen
+        print('adahrs:', adahrs_lst)
+    # Now get the next msg, should be an EMS msg
+    data, addr = data_sock.recvfrom(1024) # buffer size is 1024 bytes
+    msg_raw = bytes.decode(data)
+    if (msg_raw[1] == '3'):
+        # This is an EMS message, process it next
+        # Write raw data to file
+        f.write(msg_raw)
+        # Call parse fuction for EMS (Will we use this?)
+        ems_lst = parse_ems(msg_raw)
+        # Print to screen
+        print('ems:',ems_lst)
     # This code quickly checks the GPS socket for data 
     new_gps_data, _, _ = select.select([gps_sock],[],[],.025) #.025 is the timeout (time to wait)
     # If there is data , then process it
@@ -108,13 +108,17 @@ while True:
         #
     # This code will update the row in the DynamoDB table
     # Build the payload, which is a Python dict
-    payload = create_payload(adahrs_lst,lat,lon,gspd,magvar)
+    try:
+        payload = create_payload(adahrs_lst,lat,lon,gspd,magvar)
+    except:
+        print('Did not get valid return from create_payload() function.')
     #print('Returned payload:', payload)
     #
     # Insert into DynamoDB
     try:
         dynamo_response = table.put_item(Item = payload)
     except:
-        print('DynamoDB Failure: ',dynamo_response['ResponseMetadata']['HTTPStatusCode'])
+        print('Something went wrong with DynamoDB')
+        #print('DynamoDB Failure: ',dynamo_response['ResponseMetadata']['HTTPStatusCode'])
     
 
